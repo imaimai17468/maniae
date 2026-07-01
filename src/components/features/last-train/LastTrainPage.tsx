@@ -60,14 +60,20 @@ export const LastTrainPage = () => {
   const { resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => {
-    if (!("geolocation" in navigator)) {
-      setAppState("error");
-      setErrorMessage("お使いのブラウザは位置情報に対応していません");
+    const fallbackToReady = () => {
+      setAppState("ready");
+    };
+
+    if (!("geolocation" in navigator) || !window.isSecureContext) {
+      fallbackToReady();
       return;
     }
 
+    const timeoutId = setTimeout(fallbackToReady, 15000);
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        clearTimeout(timeoutId);
         const loc = {
           lat: pos.coords.latitude,
           lon: pos.coords.longitude,
@@ -77,13 +83,13 @@ export const LastTrainPage = () => {
         void reverseGeocode(loc.lat, loc.lon, 8, 1000).then(setNearbyStations);
       },
       () => {
-        setAppState("error");
-        setErrorMessage(
-          "位置情報を取得できませんでした。ブラウザの設定を確認してください"
-        );
+        clearTimeout(timeoutId);
+        fallbackToReady();
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
     );
+
+    return () => clearTimeout(timeoutId);
   }, []);
 
   const doSearch = useCallback(
