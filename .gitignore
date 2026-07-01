@@ -40,6 +40,9 @@ yarn-error.log*
 .env*
 !.env.local.example
 
+# cloudflare
+.wrangler
+
 # typescript
 *.tsbuildinfo
 
