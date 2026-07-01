@@ -2,14 +2,14 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
     "src/client.tsx",
+    "src/ssr.tsx",
     "src/router.tsx",
     "src/routes/**/*.{ts,tsx}",
-    "src/server/fn/**/*.ts",
     "scripts/**/*.{ts,js,sh}",
     "src/components/ui/**/*.{ts,tsx}",
     "src/lib/utils.ts"
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreDependencies": ["lefthook", "tailwindcss", "tw-animate-css"],
-  "ignore": ["src/server/cloudflare.ts", "src/test/**/*.{ts,tsx}"]
+  "ignore": ["src/test/**/*.{ts,tsx}"]
 }

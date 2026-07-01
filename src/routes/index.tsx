@@ -21,24 +21,12 @@ const STACK_ITEMS = [
     description: "Full-stack React framework with type-safe routing",
   },
   {
-    name: "Cloudflare Workers",
-    description: "Edge-first deployment on Cloudflare's global network",
-  },
-  {
     name: "shadcn/ui",
     description: "Accessible components built on Radix UI primitives",
   },
   {
     name: "Tailwind CSS v4",
     description: "Utility-first CSS with design token integration",
-  },
-  {
-    name: "Better Auth",
-    description: "Authentication with OAuth, email, and session management",
-  },
-  {
-    name: "Drizzle ORM",
-    description: "Type-safe SQL with Cloudflare D1 integration",
   },
 ] as const;
 
@@ -66,7 +54,7 @@ function HomeComponent() {
           imaimai-front-template
         </h1>
         <p className="max-w-prose text-lg text-muted-foreground">
-          TanStack Start + Cloudflare Workers で構成された フルスタック React
+          TanStack Start で構成された React
           テンプレート。和色ベースのデザインシステムと squircle
           コーナーを標準装備。
         </p>

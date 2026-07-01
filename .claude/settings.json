@@ -47,10 +47,6 @@
       "Bash(bun pm:*)",
       "Bash(bun install:*)",
       "Bash(bunx:*)",
-      "Bash(wrangler types:*)",
-      "Bash(wrangler d1 list:*)",
-      "Bash(wrangler tail:*)",
-      "Bash(drizzle-kit generate:*)",
       "Bash(ffmpeg:*)"
     ],
     "deny": [
