@@ -4,7 +4,6 @@ import {
   Scripts,
   createRootRoute,
 } from "@tanstack/react-router";
-import { Header } from "@/components/shared/header/Header";
 import { ThemeProvider } from "@/components/shared/theme-provider/ThemeProvider";
 import { Toaster } from "@/components/ui/sonner";
 import "@/styles.css";
@@ -14,8 +13,23 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "imaimai-front-templete" },
+      { title: "MANIAE! - 終電をとにかく探す" },
+      {
+        name: "description",
+        content: "周囲の公共交通機関から終電をとにかく探すWebアプリ",
+      },
+      { property: "og:title", content: "MANIAE! - 終電をとにかく探す" },
+      {
+        property: "og:description",
+        content: "周囲の公共交通機関から終電をとにかく探すWebアプリ",
+      },
+      { property: "og:image", content: "/og-image.png" },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "MANIAE! - 終電をとにかく探す" },
+      { name: "twitter:image", content: "/og-image.png" },
     ],
+    links: [{ rel: "icon", type: "image/png", href: "/favicon.png" }],
   }),
   component: RootComponent,
   notFoundComponent: () => <p>ページが見つかりません</p>,
@@ -40,14 +54,7 @@ function RootComponent() {
           enableSystem
           disableTransitionOnChange
         >
-          <div className="flex min-h-dvh flex-col gap-16">
-            <Header />
-            <div className="flex w-full flex-1 justify-center px-6 md:px-4">
-              <div className="container w-full">
-                <Outlet />
-              </div>
-            </div>
-          </div>
+          <Outlet />
           <Toaster richColors position="top-center" />
         </ThemeProvider>
         <Scripts />
