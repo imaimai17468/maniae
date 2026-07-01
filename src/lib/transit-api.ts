@@ -222,12 +222,20 @@ function formatDurationMinutes(secs: number): number {
   return Math.round(secs / 60);
 }
 
+function stripEnglish(text: string): string {
+  return text
+    .replace(/\s*[A-Za-z][-A-Za-z\s]*/g, "")
+    .replace(/[()（）]/g, "")
+    .trim();
+}
+
 export {
   suggestLocations,
   reverseGeocode,
   searchTrains,
   formatServiceTime,
   formatDurationMinutes,
+  stripEnglish,
 };
 
 type UserLocation = {

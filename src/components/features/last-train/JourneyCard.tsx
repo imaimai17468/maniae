@@ -1,14 +1,11 @@
 import { Footprints, ArrowRight } from "lucide-react";
-import { formatServiceTime, formatDurationMinutes } from "@/lib/transit-api";
+import {
+  formatServiceTime,
+  formatDurationMinutes,
+  stripEnglish,
+} from "@/lib/transit-api";
 import type { Journey } from "@/lib/transit-api";
 import { cn } from "@/lib/utils";
-
-function stripEnglish(text: string): string {
-  return text
-    .replace(/\s*[A-Za-z][-A-Za-z\s]*/g, "")
-    .replace(/[()（）]/g, "")
-    .trim();
-}
 
 type JourneyCardProps = {
   journey: Journey;

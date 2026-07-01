@@ -4,10 +4,11 @@ import {
   useMap,
   MapMarker,
   MarkerContent,
-  MarkerLabel,
+  MarkerPopup,
   MapRoute,
   MapControls,
 } from "@/components/ui/map";
+import { stripEnglish } from "@/lib/transit-api";
 import type { Journey, NearbyPlace, UserLocation } from "@/lib/transit-api";
 
 const ROUTE_MUTED_COLOR = "#888";
@@ -87,7 +88,9 @@ export const TrainMap = ({
           <MarkerContent>
             <div className="size-4 rounded-full border-2 border-background bg-accent" />
           </MarkerContent>
-          <MarkerLabel>現在地</MarkerLabel>
+          <MarkerPopup className="border-none bg-foreground p-1 px-2 shadow-none text-background text-xs font-medium">
+            現在地
+          </MarkerPopup>
         </MapMarker>
       )}
 
@@ -102,7 +105,9 @@ export const TrainMap = ({
               駅
             </div>
           </MarkerContent>
-          <MarkerLabel>{station.name}</MarkerLabel>
+          <MarkerPopup className="border-none bg-foreground p-1 px-2 shadow-none text-background text-xs font-medium">
+            {stripEnglish(station.name)}
+          </MarkerPopup>
         </MapMarker>
       ))}
 
@@ -133,7 +138,9 @@ export const TrainMap = ({
                     <MarkerContent>
                       <div className="size-3 rounded-full border-2 border-background bg-foreground" />
                     </MarkerContent>
-                    <MarkerLabel>{p.name}</MarkerLabel>
+                    <MarkerPopup className="border-none bg-foreground p-1 px-2 shadow-none text-background text-xs font-medium">
+                      {stripEnglish(p.name)}
+                    </MarkerPopup>
                   </MapMarker>
                 ))}
           </Fragment>
