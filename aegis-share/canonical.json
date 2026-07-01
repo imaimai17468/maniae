@@ -1,0 +1,207 @@
+{
+  "format_version": 1,
+  "snapshot_id": "9ee28a59fa71596402e6b5d6cb3bed407be9ed65956b0eabbc8a84f431a84e02",
+  "knowledge_version": 62,
+  "documents": [
+    {
+      "doc_id": "adr-0001",
+      "title": "Coding Rules via Claude Rules Include",
+      "kind": "reference",
+      "content": "# 0001. Coding rules live in `.claude/rules/` and load via `AGENTS.md` `@include`\n\n- Status: accepted\n- Date: 2026-04-23\n\n## Context\n\nThe repository needed a place to record coding conventions (style, architecture, testing, dependencies, agent dispatch policy, tools) that AI coding agents would actually follow.\n\nClaude Code offers two surfaces for project-scoped guidance:\n\n- **Skills** at `.claude/skills/<name>/SKILL.md`: invoked on demand, either explicitly (`/skill-name`) or autonomously based on a `description`-defined trigger.\n- **Always-on rules** loaded through `CLAUDE.md` / `AGENTS.md` `@include` directives.\n\nThe first iteration packed all coding rules into a `coding-guide` skill. In practice this meant the rules were only consulted when the agent decided to look — and that decision was unreliable. Meanwhile `AGENTS.md` carried a duplicated, summarized version of the same rules, creating maintenance drift.\n\n## Decision\n\nCoding rules live as one file per topic under `.claude/rules/` and are loaded into every session via explicit `@.claude/rules/<topic>.md` lines in `AGENTS.md`. The `coding-guide` skill is removed.\n\nFiles: `style.md`, `architecture.md`, `testing.md`, `dependencies.md`, `tools.md`, `agents.md`.\n\n`AGENTS.md` becomes a thin shell — a one-paragraph orientation note plus the `@include` list — so the source of truth is the rule files themselves.\n\n## Alternatives considered\n\n- **Keep the `coding-guide` skill**: rejected because skill invocation is unreliable, and the skill duplicated content already condensed in `AGENTS.md`.\n- **Inline all rules directly into `AGENTS.md`**: rejected because the file would balloon past comfortable length, and per-topic editing would touch one large file instead of small focused files.\n- **Use a dedicated marketplace / framework (e.g., aegis, superpowers)**: rejected for now — too few rule files to justify the runtime / setup cost. Reconsider when rule count exceeds ~15 or per-file-path scoping is needed.\n\n## Consequences\n\n- Rules apply on every session start without agent action — no missed-trigger failure mode.\n- Each rule is one focused file, so edits are surgical and diffs are readable.\n- The `stop-agent-review.sh` hook reads from `.claude/rules/*.md` directly, keeping enforcement aligned with the source of truth.\n- Cost: every session pays the token weight of the full rule set even when rules aren't relevant to the current task. Acceptable while the rule set is small.\n",
+      "content_hash": "96b808ecf536522fb4133cd91b880544f1b4c55d2833232bd26cf04842588eb4",
+      "ownership": "file-anchored",
+      "template_origin": null,
+      "source_path": "docs/adr/0001-coding-rules-via-claude-rules-include.md",
+      "source_refs_json": null
+    },
+    {
+      "doc_id": "adr-0002",
+      "title": "Direct Deps Only Audit",
+      "kind": "reference",
+      "content": "# 0002. `bun audit` blocks only on direct-dep vulnerabilities\n\n- Status: accepted\n- Date: 2026-04-24\n\n## Context\n\nAdding `bun audit` to CI surfaced 60 vulnerabilities across direct and transitive dependencies. Direct ones (e.g., outdated `drizzle-orm` with a SQL injection advisory) are fixable by version bumps. Transitive ones (`tar`, `fast-xml-parser`, `undici`, etc., reachable through `@aws-sdk`, `wrangler`, `vitest`) cannot be patched without `package.json` `overrides`.\n\nA first attempt added 13 `overrides` entries to silence the audit. This achieved a clean audit but introduced significant maintenance debt:\n\n- Each override is a manual patch unrelated to product intent\n- Dependabot does not track override-pinned versions\n- Major-version overrides on transitive deps (e.g., `fast-xml-parser` 4 → 5 inside `@aws-sdk`) carry runtime risk that build-time tests can't catch\n- Overrides leak to projects derived from this template, polluting their dependency graph with patches they may not need\n\n## Decision\n\nThe CI gate fails only on vulnerabilities in **direct** `dependencies` / `devDependencies`. Transitive vulnerabilities are reported as informational and tolerated until upstream releases catch up. The check is implemented in `scripts/audit-direct.sh`, which intersects `bun audit --json` output with the direct-dep keys from `package.json`.\n\n`overrides` is not used.\n\n## Alternatives considered\n\n- **Keep `overrides` and block on all severities**: rejected — high maintenance cost, runtime risk from forced major bumps, template pollution.\n- **`bun audit --audit-level=high`**: rejected — still flags transitive issues we can't patch, and ignores low/moderate direct-dep findings we'd want to see.\n- **`continue-on-error: true` on the audit step**: rejected — reduces audit to a warning humans will eventually ignore. Direct-dep findings should hard-block.\n- **`npm audit signatures` / supply-chain provenance verification**: not yet — Bun does not surface a comparable check at parity, and it overlaps with what Socket.dev (separate decision) covers.\n\n## Consequences\n\n- Direct deps stay clean and force timely upgrades when advisories drop.\n- Transitive vulnerabilities ride until the responsible direct dep updates its pin. Operationally this means roughly weekly attention via Dependabot PRs.\n- The script is the source of truth for \"what counts as a blocker\"; future tightening (severity threshold, allowlist by CVE) edits one file.\n- Derivative projects inherit the same boundary without any per-project tweaks.\n",
+      "content_hash": "e1196bde0b1d3125f851cfc799459f9dead1aea995fa47cee9d175c140908698",
+      "ownership": "file-anchored",
+      "template_origin": null,
+      "source_path": "docs/adr/0002-direct-deps-only-audit.md",
+      "source_refs_json": null
+    },
+    {
+      "doc_id": "adr-0003",
+      "title": "Subagent Driven Implementation",
+      "kind": "reference",
+      "content": "# 0003. Ticket-granularity implementation is delegated to subagents\n\n- Status: accepted\n- Date: 2026-04-24\n\n## Context\n\nWhen the parent session (the one talking to the user) implements features directly, two costs accumulate:\n\n1. The parent's context window fills with implementation details (file reads, search results, intermediate edits) that aren't needed for orchestration. As context grows, response quality degrades.\n2. Every implementation step uses the parent's model (typically Opus). Most implementation steps don't need Opus; they need a competent executor.\n\nClaude Code provides the `Agent` tool, which dispatches a fresh subagent with isolated context and a per-call model override. Built-in subagent types include `general-purpose` (full toolkit), `Explore` (read-only search), `Plan` (design only), and others.\n\n## Decision\n\nImplementation work at \"ticket\" granularity — components, bug fixes, refactors, anything that would normally be one PR — is dispatched to a subagent rather than executed in the parent session. The parent's job is briefing, dispatch, review, and commit/PR.\n\nDefault models per subagent type are codified in `.claude/rules/agents.md`:\n\n- `general-purpose` → `sonnet`\n- `Explore` → `haiku`\n- `Plan` → `sonnet`\n\n`opus` is used only when the dispatched task involves non-trivial design judgment or when a `sonnet`-level run came back with low-quality output.\n\nTrivial work (one-line fixes, typo corrections, config tweaks) stays in the parent — dispatch overhead exceeds the savings.\n\n`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is enabled for genuine multi-agent parallel collaboration only, not for single-task offloads.\n\n## Alternatives considered\n\n- **Always implement in the parent**: rejected — context bloat and Opus overuse on mechanical work.\n- **Always dispatch (including trivial)**: rejected — briefing overhead and the round-trip latency outweigh savings on small edits.\n- **Always use Opus in subagents**: rejected — defeats the cost-saving purpose. Most ticket-granularity work runs cleanly on Sonnet.\n- **Build many task-specific custom subagents** (`component-scout`, `bug-hunter`, etc.): rejected for now — speculative without observed need. Add when a clear pattern emerges from real use.\n\n## Consequences\n\n- Parent context stays compact across long conversations, preserving response quality.\n- Cost per implementation drops because Sonnet/Haiku do the bulk of the work.\n- The user sees a \"diff plus summary\" return rather than a streaming implementation, which is worse for live observation but better for asynchronous review.\n- Subagents inherit no in-session memory, so briefings must be self-contained — every dispatch needs explicit context, file paths, and acceptance criteria. This is a deliberate trade for isolation.\n",
+      "content_hash": "b4383ec02b06eafea7609bcfdc0e93b08aedf3957014bfc575d5c5e873e48e70",
+      "ownership": "file-anchored",
+      "template_origin": null,
+      "source_path": "docs/adr/0003-subagent-driven-implementation.md",
+      "source_refs_json": null
+    },
+    {
+      "doc_id": "adr-0004",
+      "title": "Permission Deny as Security Boundary",
+      "kind": "reference",
+      "content": "# 0004. `permissions.deny` is the security boundary, not `ask`\n\n- Status: accepted\n- Date: 2026-04-23\n\n## Context\n\n`.claude/settings.json` permissions have three buckets: `allow` (auto-execute), `ask` (prompt user), `deny` (refuse). The initial configuration used only `allow` and `ask`, treating `ask` as the safety net for risky operations like `git push` or `rm`.\n\nThis relies on the user actually reading and refusing the prompt. In practice:\n\n- Permission modes (`acceptEdits`, `bypassPermissions`, `--dangerously-skip-permissions`, auto mode) collapse `ask` into effective `allow`.\n- Prompt-injection content from web pages, MCP tools, or files can pressure the agent into running destructive commands; an `ask` dialog mixed in with legitimate requests is easy to approve mechanically.\n- Some actions are not reversible enough for prompt-based gating to be useful — `rm -rf`, `git push --force` to main, `git reset --hard`, dropping `.env` reads — and should be refused outright.\n\n## Decision\n\n`deny` enumerates operations that are never acceptable, even with explicit approval. Specifically:\n\n- Destructive `rm` (`-rf` / `-fr` / `-r`)\n- Force-push variants and `--force-with-lease`\n- `git reset --hard`, `git clean -fd[x]`, `git branch -D`, `git checkout .` / `--`, `git restore .` / `--`\n- `git commit --amend` (history rewriting on shared work)\n- `sudo`, broad `chmod -R`\n- `Read` / `Write` / `Edit` against `.env`, `.env.local`, `.env.development`, `.env.production`\n\n`ask` covers the remaining consequential operations (normal `git push`, `git commit`, `gh pr create`, deploys, `rm` of single files, `bun add` without `-E`).\n\n`allow` is widened to cover read-only operations (git status / log / diff / show / branch / blame, `gh pr view`, `bun pm ls`) so the user is not interrupted for routine inspection.\n\n## Alternatives considered\n\n- **Keep using `ask` for everything risky**: rejected — `ask` is bypassable in multiple modes and depends on human vigilance.\n- **`deny` everything except a small `allow` list**: rejected — too restrictive for normal flow, generates constant friction.\n- **External wrapper script that filters commands before they reach Bash**: rejected for now — `permissions` is the supported mechanism, and external wrappers are easy to circumvent and harder to debug.\n\n## Consequences\n\n- Destructive operations are off the table regardless of session mode or prompt-injection pressure.\n- `ask` bucket stays focused on operations a user genuinely should approve case-by-case.\n- New tools added to the project may need explicit `allow` entries; otherwise they fall through to the default `ask`. This is a feature — it forces conscious decision-making about new tooling.\n- When this list needs to evolve (new bypass techniques, new tools), edit `.claude/settings.json` directly.\n",
+      "content_hash": "63d5e4a578decd25724ee1c08736e904233675cf401978c6007e5615a549122a",
+      "ownership": "file-anchored",
+      "template_origin": null,
+      "source_path": "docs/adr/0004-permission-deny-as-security-boundary.md",
+      "source_refs_json": null
+    },
+    {
+      "doc_id": "adr-0005",
+      "title": "Wrangler Types for Cloudflare Env",
+      "kind": "reference",
+      "content": "# 0005. Generate `CloudflareEnv` via `wrangler types`, not hand-written\n\n- Status: accepted\n- Date: 2026-04-23\n\n## Context\n\nThe `getCloudflareContext().env` object's shape (D1 / R2 / KV / vars) is dictated by `wrangler.toml`. Originally `src/env.d.ts` declared a hand-maintained `CloudflareEnv` interface mirroring those bindings.\n\nThe hand-maintained file is silently desynchronized whenever `wrangler.toml` adds or renames a binding. Type errors only surface at the call site, often far from the change.\n\n`wrangler types` generates a `worker-configuration.d.ts` directly from `wrangler.toml`, producing a `CloudflareEnv` interface that is guaranteed to match the actual bindings (plus the workerd runtime types).\n\n## Decision\n\nDrop hand-maintained `src/env.d.ts`. Add `cf-typegen` script (`wrangler types --env-interface CloudflareEnv`) and gitignore the output `worker-configuration.d.ts`. Whenever `wrangler.toml` changes, run `bun run cf-typegen` to regenerate.\n\nThe generated file lives at the project root and is picked up automatically by the existing `tsconfig.json` `**/*.ts` include glob — no additional config required.\n\n## Alternatives considered\n\n- **Keep `src/env.d.ts` hand-maintained**: rejected — silent drift between `wrangler.toml` and the type is too easy.\n- **Commit `worker-configuration.d.ts`**: rejected — it's a generated artifact, large (>400 KB), and noisy in diffs. Treating generated files like committed source invites stale-on-clone bugs.\n- **Hook `cf-typegen` into `bun install` or a postinstall script**: rejected — lifecycle scripts are off by default in Bun (see `trustedDependencies`), and adding them just for typegen invites supply-chain script execution we don't otherwise want. Manual regenerate is the explicit ergonomic.\n\n## Consequences\n\n- Adding a binding becomes a two-step ritual: edit `wrangler.toml`, run `bun run cf-typegen`. Forgetting step two surfaces immediately as a type error in any code that touches `env`.\n- The generated file is large but not in the repo, so it doesn't hit code review.\n- Onboarding a new collaborator requires they run `cf-typegen` once after clone — documented in `.claude/rules/tools.md`.\n- The workerd runtime types come along for free, replacing any ad-hoc Cloudflare-runtime type imports.\n",
+      "content_hash": "aea5257f6c42804142eb9f3fd41a6b8926a39dd2cb91a2e16d6973606510a15e",
+      "ownership": "file-anchored",
+      "template_origin": null,
+      "source_path": "docs/adr/0005-wrangler-types-for-cloudflare-env.md",
+      "source_refs_json": null
+    },
+    {
+      "doc_id": "adr-0006",
+      "title": "Orchestration Layering",
+      "kind": "reference",
+      "content": "# 0006. `/start-workflow` is the single orchestration entry; aegis / superpowers / custom skills are sub-steps\n\n- Status: accepted\n- Date: 2026-04-27\n\n## Context\n\nThe repository now has five overlapping layers that all participate in steering an AI coding agent through a task:\n\n1. **Permission gates** (`.claude/settings.json` `deny` / `ask` / `allow`) — physically refuses destructive operations.\n2. **Hooks** (`pre-tool-use-guard`, `stop-quality-gate`, `stop-agent-review`, `stop-component-verify`) — mechanical enforcement of coding rules.\n3. **`.claude/rules/*.md` via `AGENTS.md` `@include`** — keeps coding rules in the prompt at all times.\n4. **aegis** (MCP server, agent + admin surfaces) — deterministic context compilation: given `target_files`, returns the relevant rule / ADR documents with relevance scores.\n5. **superpowers** (Claude marketplace plugin) — opinionated methodology: brainstorming → plans → git worktrees → subagent-driven dev → TDD → review → finishing.\n\nPlus the project's own custom skills: `start-workflow` (entry point), `commit`, `pr`, `empirical-prompt-tuning`.\n\nLayers 4 and 5 in particular have overlapping concerns:\n\n- aegis returns rule docs based on file paths; the same docs are already loaded via `@include`. Without a clear policy this means the same content arrives twice.\n- superpowers' `brainstorming` / `writing-plans` overlap with `start-workflow`'s clarify / plan steps.\n- superpowers' `subagent-driven-development` overlaps with the project's `agents.md` dispatch policy.\n\nThe risk is \"too many cooks\": the agent can't tell which orchestrator owns which step, the user sees inconsistent behavior depending on which trigger fires first, and small operational decisions (model selection, commit splitting) get made in two places.\n\n## Decision\n\n**`/start-workflow` is the single command center for ticket-granularity work.** Every other layer is called as a sub-step from inside `/start-workflow`, not as an independent autonomous trigger.\n\nThe intended call graph for a typical request is:\n\n```\n/start-workflow\n├── 1. clarify (one focused question if needed)\n├── 2. aegis_compile_context(target_files, plan)\n│       → returns relevant rules/ADRs with relevance scores\n├── 3. plan (delegate to superpowers:writing-plans if the work warrants it)\n├── 4. ADR? (write docs/adr/NNNN-... if a non-obvious design decision exists)\n├── 5. dispatch to general-purpose subagent (model: sonnet, per agents.md)\n├── 6. parent reviews diff (Before-reporting-done pass from agents.md)\n├── 7. /commit (split discipline)\n└── 8. /pr (English summary + demo GIF)\n\nHooks (pre/post-tool, stop) fire automatically throughout — they are\nenforcement, not orchestration, and need no explicit coordination.\nPermission gates are the security floor — they apply everywhere.\n```\n\n**Layer roles, codified:**\n\n- **Permissions / hooks**: enforcement only. Do not change them based on which orchestrator is active.\n- **`@include` rules**: always-on baseline. Stay in `AGENTS.md` until aegis context overhead becomes the bottleneck.\n- **aegis**: context narrowing. Used inside `start-workflow` step 2 — not invoked autonomously elsewhere.\n- **superpowers**: methodology toolbox. Individual superpowers skills (`brainstorming`, `writing-plans`, `using-git-worktrees`, `test-driven-development`, etc.) are called explicitly from inside `start-workflow` when their step applies. Do not let superpowers auto-trigger as a parallel orchestrator — the project's `start-workflow` owns the sequence.\n- **custom skills (`commit`, `pr`)**: prevail over any superpowers equivalent. They are empirically tuned for this project; do not use the marketplace replacements.\n- **`start-workflow`**: the only orchestrator. Trivial work (one-line fixes, config tweaks, docs-only changes) skips this entirely and is handled directly in the parent.\n\nWhen `start-workflow` and a superpowers skill describe the same step (e.g., planning), `start-workflow`'s sequence is authoritative; superpowers' skill is a tool the parent may use to execute the step, not a parallel decision-maker.\n\n## Alternatives considered\n\n- **Adopt superpowers as the orchestrator and remove `start-workflow`**: rejected. Superpowers' skills auto-trigger based on the LLM's interpretation of `description` fields, which is empirically unreliable (the same problem that killed the `self-review` skill in this project). An explicit single entry point is more predictable.\n\n- **Drop `@include` rules and rely entirely on aegis**: rejected for now. The current rule set is small enough that always-loading is cheaper than the round-trip cost of compiling context for every interaction. Reconsider when rule count exceeds ~15 or when context bloat becomes measurable.\n\n- **Skip `start-workflow` and let aegis + superpowers self-coordinate**: rejected. There is no shared protocol between them; both will think they own the planning step, and the user sees whichever trigger fires first.\n\n- **Build a `/start-workflow` so heavyweight that it replaces superpowers entirely**: rejected. Superpowers' skills are well-tested and cover ground the project would have to re-solve (worktree setup, TDD enforcement). Use them as building blocks, don't reinvent.\n\n## Consequences\n\n- **One mental model for the user**: `/start-workflow` for real work, direct interaction for trivial. No \"which entry point do I use?\" question.\n- **One mental model for the agent**: every ticket-granularity request enters through `start-workflow`; the agent does not need to predict whether superpowers or aegis will trigger first.\n- **Layer boundaries stay clean**: enforcement layers (permissions, hooks) are policy, not flow. Orchestration layers (start-workflow, aegis, superpowers, custom skills) have a clear hierarchy.\n- **Cost**: superpowers' value-add depends on it being explicitly called from `start-workflow`. If a future agent forgets to use it, the project loses superpowers' methodology benefits without noticing — this is detectable through observation (compile_miss-style feedback) but requires periodic review.\n- **`start-workflow` becomes load-bearing.** Changes to it need empirical tuning (`empirical-prompt-tuning` skill) before they ship, because every ticket-granularity task flows through it.\n- **Migration path is preserved**: if aegis or superpowers proves more reliable than expected, this decision can be reversed by editing `start-workflow` and superseding this ADR. The dependency goes one way (start-workflow → aegis / superpowers), so peeling layers is feasible.\n",
+      "content_hash": "b1367a7fffc8568dc711a43df4d9016372dabcdfef2d07d878b63acbf39d3009",
+      "ownership": "file-anchored",
+      "template_origin": null,
+      "source_path": "docs/adr/0006-orchestration-layering.md",
+      "source_refs_json": null
+    },
+    {
+      "doc_id": "adr-0007",
+      "title": "TanStack Start Migration",
+      "kind": "reference",
+      "content": "# 0007. Migrate from Next.js (App Router + OpenNext) to TanStack Start\n\n- Status: accepted\n- Date: 2026-04-30\n\n## Context\n\nThis template ran on Next.js 16 (App Router) deployed to Cloudflare Workers via `@opennextjs/cloudflare`. That stack worked, but accumulated friction:\n\n- **Type signal is indirect.** App Router is convention-first. Page params, search params, and layout-to-page data flow are inferred from filesystem structure rather than from a typed router. Errors surface at runtime or as opaque type widening.\n- **OpenNext is an adapter, not a deployment target.** Cloudflare Workers compatibility was achieved by translating the Next runtime into a Workers worker. Each Next minor release risks an OpenNext lag (we hit this in 16.x). The Worker entrypoint, asset pipeline, and Node-compat shims are not under our direct control.\n- **Two server-execution models in one codebase.** App Router exposes Server Components, Server Actions (`\"use server\"`), Route Handlers, Middleware, and `revalidatePath` — overlapping concerns with subtle caching semantics. The template's audience (derivative projects) must learn all of them to ship a small feature.\n- **Vite-native tooling is already preferred elsewhere.** Vitest + `@vitejs/plugin-react` + `vite-tsconfig-paths` are already the test stack. The dev/build pipeline is the only place still on a non-Vite bundler.\n\nTanStack Start (Vite + Nitro + TanStack Router) addresses these:\n\n- TanStack Router gives **end-to-end type inference** from route definitions through `Link`, `useParams`, `useSearch`, and `loader` data — no `routeTree.gen.ts` divergence because the plugin regenerates it on save.\n- Nitro's `cloudflare-module` preset is **a first-class deployment target**, not a translation layer. The Worker entry is generated directly from the app graph; D1/R2/KV bindings reach handlers via `event.context.cloudflare.env`.\n- The server-execution model collapses to two primitives: **Server Functions** (`createServerFn`) for RPC-style mutations and **API Routes** (`createServerFileRoute`) for HTTP endpoints. No `revalidatePath`, no `\"use server\"` directive layering.\n- The build/dev pipeline becomes pure Vite, sharing config and plugin surface with Vitest.\n\n## Decision\n\nMigrate the template to TanStack Start with the **`cloudflare-module` Nitro preset**. OpenNext (`@opennextjs/cloudflare`) and `next` are removed entirely. The migration is a **big bang** replacement on `main`, not an incremental coexistence — Next App Router and TanStack Router cannot share filesystem routing in a single Vite/Nitro pipeline, and the template has only one consumer surface.\n\nKey replacements:\n\n| Concern | Before (Next) | After (TanStack Start) |\n| --- | --- | --- |\n| Routing | `src/app/**/page.tsx`, `layout.tsx`, `not-found.tsx` | `src/routes/**` via `createFileRoute` + `__root.tsx` |\n| Auth guard | `src/middleware.ts` matcher | route `beforeLoad` throwing `redirect()` |\n| HTTP endpoints | `app/api/**/route.ts` (`NextRequest`/`NextResponse`) | `createServerFileRoute(...).methods(...)` |\n| Server mutations | `\"use server\"` actions + `revalidatePath` | `createServerFn` + `queryClient.invalidateQueries` |\n| Cloudflare env | `getCloudflareContext()` (OpenNext) | `getCloudflareEnv()` wrapping Nitro `getEvent().context.cloudflare.env` |\n| Build / deploy | `opennextjs-cloudflare build && wrangler deploy` | `vite build && wrangler deploy` (Nitro emits `.output/server/index.mjs`) |\n| Image optimization | `next/image` + `next.config.mjs` `remotePatterns` | plain `<img>` (R2-served avatars need no transform) |\n\n`wrangler types` (ADR-0005) and the generated `worker-configuration.d.ts` are preserved unchanged — `CloudflareEnv` remains the single source of truth for D1/R2 bindings, and the `cf-typegen` script keeps its current contract.\n\n`better-auth`, `drizzle-orm`, Tailwind v4 (PostCSS), `react-hook-form`, `zod`, `next-themes`, `sonner`, oxlint/oxfmt, tsgo, vitest, knip, and lefthook are all retained at their current pinned versions.\n\n## Alternatives considered\n\n- **Stay on Next.js.** Rejected — the friction above is structural, not transient. Next 17 will not undo the App Router execution model or remove the OpenNext dependency for Workers.\n- **React Router v7 (Remix lineage).** Rejected — closer to Next's loader/action model than TanStack's typed-router model, and lacks first-party Cloudflare Workers SSR ergonomics on parity with Nitro's preset matrix.\n- **Astro with React islands.** Rejected — the template targets fully interactive product UIs (login, profile editing, file upload). Astro's MPA-first model is a poor fit.\n- **Incremental coexistence (Next pages alongside TanStack routes).** Rejected — file-system routing collisions, two SSR runtimes, doubled deploy surface. Big-bang on a template repo is cheaper than carrying a transitional state into derivative projects.\n- **Drop Cloudflare Workers, move to Node hosting (Vercel / Render).** Rejected — D1 + R2 binding access is a deliberate template feature; losing it would force every derivative project to re-pick a database and storage layer.\n\n## Consequences\n\n- **Derivative projects gain typed routing for free.** New routes, params, and search params are type-checked from declaration through usage. This is the largest day-to-day DX win.\n- **One server-execution model.** `createServerFn` for mutations, `createServerFileRoute` for HTTP. `\"use server\"`, `revalidatePath`, `next/headers`, `next/cache`, `next/navigation` are gone.\n- **Cache invalidation is now an explicit client concern.** Server Functions don't auto-invalidate; mutations must call `queryClient.invalidateQueries` (or the equivalent). This trades implicit revalidation for predictable, debuggable cache flow.\n- **Worker entrypoint owned by Nitro.** `wrangler.toml#main` points to `.output/server/index.mjs`, `[assets].directory` to `.output/public`. Upgrading wrangler or the Cloudflare runtime no longer requires waiting on an OpenNext release.\n- **Migration cost is one-time but non-trivial.** Every page, API route, server action, and middleware is rewritten. The `Link` import path changes in 7 files. `next/image` callers (currently only `next.config.mjs#remotePatterns` for `lh3.googleusercontent.com`) are dropped — derivative projects that need image transforms must add `@unpic/react` or similar explicitly.\n- **`bun audit` direct-dep policy (ADR-0002) still holds.** Adding `@tanstack/react-start` and `vite` as direct deps means their advisories are now in scope; transitive vulnerabilities under them are tolerated under the existing rule.\n- **Subagent-driven implementation policy (ADR-0003) and the rules-include layout (ADR-0001) are unaffected.** The migration itself is dispatched task-by-task per `.claude/rules/agents.md`.\n",
+      "content_hash": "28c3f559503b22af4d4d2978164149e5d362e0c6db644a4e7e0192aab89c5574",
+      "ownership": "file-anchored",
+      "template_origin": null,
+      "source_path": "docs/adr/0007-tanstack-start-migration.md",
+      "source_refs_json": null
+    },
+    {
+      "doc_id": "adr-0008",
+      "title": "Consolidate Rules into AGENTS.md",
+      "kind": "reference",
+      "content": "# 0008. Coding rules are condensed into AGENTS.md; detailed rule files and the codex pre-commit review are retired\n\n- Status: accepted\n- Date: 2026-06-13\n\n## Context\n\nADR-0001 placed coding rules as seven files under `.claude/rules/`, loaded into every session via `AGENTS.md` `@include`. The rule set grew large (hooks.md alone exceeded 600 lines), so every session paid a heavy always-on token cost — the exact failure mode ADR-0001 flagged as \"acceptable while the rule set is small\". Meanwhile two review mechanisms enforced the rules at commit time: a `PreToolUse(Bash)` hook running a codex CLI review (`pre-commit-code-review.sh`) and a guard requiring a prior review skill invocation (`pre-commit-review-guard.sh`). The codex hook added latency (up to 300 s per commit), an external CLI dependency, and coupling to the rule-file paths.\n\n## Decision\n\n1. `.claude/rules/` is deleted. The durable essence of each rule (white-box testing, Rules of React, commit split discipline, agent dispatch) is condensed into sections of `AGENTS.md`, which becomes the single always-on instruction file alongside cross-project philosophy sections (Design Philosophy / Knowledge Currency / Code Practices). `CLAUDE.md` holds only `@AGENTS.md`.\n2. The corresponding `rule-*` documents are removed from the Aegis knowledge base; the KB carries ADRs only.\n3. The two pre-commit hooks are deleted. Code review moves into the `start-workflow` skill as an explicit step: after implementation, the parent dispatches the `code-reviewer` agent (`model: opus`) on the uncommitted diff and addresses findings before commit.\n4. The subagent model table moves from `.claude/rules/agents.md` to `AGENTS.md`: sonnet for mechanical/implementation work, opus for planning and review, fable for long-horizon or escalated work.\n\nThis supersedes ADR-0001 and amends ADR-0006 (layer 3 \"rules via @include\" is now \"condensed AGENTS.md\") and ADR-0003 (model defaults now codified in AGENTS.md).\n\n## Alternatives considered\n\n- **Keep detailed rules on disk, serve them via Aegis only**: rejected — deferred delivery requires readable source files, and keeping deleted-from-prompt files on disk invites drift between the condensed and detailed versions.\n- **Keep the codex pre-commit hook**: rejected — per-commit latency and an external CLI dependency, while the same review quality is available from an opus subagent dispatched once per task instead of once per commit.\n- **Inline full rule detail into AGENTS.md**: rejected — recreates the token cost the change is meant to remove.\n\n## Consequences\n\n- Session startup context shrinks substantially; the condensed rules keep the enforceable core.\n- Detail and rationale beyond the condensed text now live only in git history and ADRs — when a condensed rule proves too terse in practice, expand it in place or record the rationale as a new ADR.\n- Commits are no longer mechanically gated by review; the review obligation lives in `start-workflow` and the AGENTS.md \"Review\" section. This trades hard enforcement for speed and must be watched for regressions.\n- Hooks `stop-aegis-sync-check.sh`, `session-start-aegis-hydrate.sh`, and `user-prompt-skill-reminder.sh` now reference `docs/adr/` only.\n",
+      "content_hash": "da154842622002d2fb64fb8266a2006c7e0a8b5222c9727871337f390027b71a",
+      "ownership": "file-anchored",
+      "template_origin": null,
+      "source_path": "docs/adr/0008-consolidate-rules-into-agents-md.md",
+      "source_refs_json": null
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "353aec4f-f43d-4b95-ad1f-92c4cf304941",
+      "source_type": "command",
+      "source_value": "scaffold",
+      "target_doc_id": "adr-0008",
+      "edge_type": "command_requires",
+      "priority": 100,
+      "specificity": 0
+    },
+    {
+      "edge_id": "6f42e10e-ad42-43dc-9e97-940e3317b368",
+      "source_type": "command",
+      "source_value": "refactor",
+      "target_doc_id": "adr-0008",
+      "edge_type": "command_requires",
+      "priority": 100,
+      "specificity": 0
+    },
+    {
+      "edge_id": "708dda36-b4d2-40fc-ba5b-50388a27ab6a",
+      "source_type": "command",
+      "source_value": "scaffold",
+      "target_doc_id": "adr-0006",
+      "edge_type": "command_requires",
+      "priority": -1,
+      "specificity": 0
+    },
+    {
+      "edge_id": "8be7feb0-54ac-46f5-b468-b5610f963488",
+      "source_type": "path",
+      "source_value": "wrangler.toml",
+      "target_doc_id": "adr-0005",
+      "edge_type": "path_requires",
+      "priority": -1,
+      "specificity": 0
+    },
+    {
+      "edge_id": "9840a836-6b3e-4ca5-bf3d-bb2b63fdcf65",
+      "source_type": "command",
+      "source_value": "scaffold",
+      "target_doc_id": "adr-0003",
+      "edge_type": "command_requires",
+      "priority": -1,
+      "specificity": 0
+    },
+    {
+      "edge_id": "affd6605-13ce-42a1-a2a6-b7afe442bb89",
+      "source_type": "command",
+      "source_value": "refactor",
+      "target_doc_id": "adr-0003",
+      "edge_type": "command_requires",
+      "priority": -1,
+      "specificity": 0
+    },
+    {
+      "edge_id": "be06b124-b411-4126-b0f9-4c5f20a1bc4c",
+      "source_type": "command",
+      "source_value": "refactor",
+      "target_doc_id": "adr-0006",
+      "edge_type": "command_requires",
+      "priority": -1,
+      "specificity": 0
+    },
+    {
+      "edge_id": "cc1dc403-beb1-4210-8bbb-de8cf10f21b7",
+      "source_type": "command",
+      "source_value": "review",
+      "target_doc_id": "adr-0008",
+      "edge_type": "command_requires",
+      "priority": 100,
+      "specificity": 0
+    },
+    {
+      "edge_id": "de4c4d45-63fd-48a2-afc3-b25b3aae3628",
+      "source_type": "path",
+      "source_value": "src/**/*",
+      "target_doc_id": "adr-0007",
+      "edge_type": "path_requires",
+      "priority": -1,
+      "specificity": 0
+    },
+    {
+      "edge_id": "ef2671ae-5eda-4a4e-af15-8db9e802bd90",
+      "source_type": "path",
+      "source_value": "package.json",
+      "target_doc_id": "adr-0002",
+      "edge_type": "path_requires",
+      "priority": -1,
+      "specificity": 0
+    },
+    {
+      "edge_id": "fde58d18-83c2-4964-9051-1421337d76e3",
+      "source_type": "path",
+      "source_value": "src/**/*",
+      "target_doc_id": "adr-0004",
+      "edge_type": "path_requires",
+      "priority": -1,
+      "specificity": 0
+    },
+    {
+      "edge_id": "ff76afcf-f1f6-42d4-a52b-1c29373abfa9",
+      "source_type": "path",
+      "source_value": "src/**/*",
+      "target_doc_id": "adr-0001",
+      "edge_type": "path_requires",
+      "priority": -1,
+      "specificity": 0
+    }
+  ],
+  "layer_rules": [],
+  "tag_mappings": []
+}
