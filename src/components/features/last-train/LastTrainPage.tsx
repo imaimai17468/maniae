@@ -61,6 +61,17 @@ export const LastTrainPage = () => {
   const { resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => {
+    const handleSuccess = (pos: GeolocationPosition) => {
+      clearTimeout(fallbackTimer);
+      const loc = {
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+      };
+      setUserLocation(loc);
+      setAppState("ready");
+      void reverseGeocode(loc.lat, loc.lon, 8, 1000).then(setNearbyStations);
+    };
+
     const handleLocationError = () => {
       setLocationError(true);
       setAppState("ready");
@@ -71,27 +82,24 @@ export const LastTrainPage = () => {
       return;
     }
 
-    const timeoutId = setTimeout(handleLocationError, 15000);
+    let fallbackTimer = setTimeout(handleLocationError, 15000);
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        clearTimeout(timeoutId);
-        const loc = {
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
-        };
-        setUserLocation(loc);
-        setAppState("ready");
-        void reverseGeocode(loc.lat, loc.lon, 8, 1000).then(setNearbyStations);
-      },
+      handleSuccess,
       () => {
-        clearTimeout(timeoutId);
-        handleLocationError();
+        navigator.geolocation.getCurrentPosition(
+          handleSuccess,
+          () => {
+            clearTimeout(fallbackTimer);
+            handleLocationError();
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
       },
       { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
     );
 
-    return () => clearTimeout(timeoutId);
+    return () => clearTimeout(fallbackTimer);
   }, []);
 
   const doSearch = useCallback(
