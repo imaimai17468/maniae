@@ -86,7 +86,10 @@ export const TrainMap = ({
       {userLocation && (
         <MapMarker longitude={userLocation.lon} latitude={userLocation.lat}>
           <MarkerContent>
-            <div className="size-4 rounded-full border-2 border-background bg-accent" />
+            <div
+              className="size-4 rounded-full border-2 border-foreground"
+              style={{ backgroundColor: "#e0b400" }}
+            />
           </MarkerContent>
           <MarkerPopup className="border-none bg-foreground p-1 px-2 shadow-none text-background text-xs font-medium">
             現在地

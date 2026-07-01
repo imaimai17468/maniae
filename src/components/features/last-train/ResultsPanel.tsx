@@ -90,41 +90,39 @@ export const ResultsPanel = ({
       </button>
 
       <div
-        className="bg-card pointer-events-auto w-full overflow-hidden transition-all duration-300 ease-out"
+        className="bg-card pointer-events-auto flex w-full flex-col overflow-hidden transition-all duration-300 ease-out"
         style={{
           maxHeight: panelOpen ? "50dvh" : "0px",
           opacity: panelOpen ? 1 : 0,
         }}
       >
-        <div className="flex flex-col gap-2 overflow-y-auto p-3">
-          <div className="flex items-center gap-3">
-            <span
-              className={cn(
-                "flex items-center gap-1 text-sm font-bold",
-                searchMode === "last"
-                  ? "text-foreground"
-                  : "text-muted-foreground"
-              )}
-            >
-              <TrainFront className="size-4" />
-              終電
-            </span>
-            <Switch
-              checked={searchMode === "now"}
-              onCheckedChange={onModeChange}
-            />
-            <span
-              className={cn(
-                "flex items-center gap-1 text-sm font-bold",
-                searchMode === "now"
-                  ? "text-foreground"
-                  : "text-muted-foreground"
-              )}
-            >
-              <Clock className="size-4" />
-              現在
-            </span>
-          </div>
+        <div className="flex shrink-0 items-center gap-3 px-3 pt-3 pb-2">
+          <span
+            className={cn(
+              "flex items-center gap-1 text-sm font-bold",
+              searchMode === "last"
+                ? "text-foreground"
+                : "text-muted-foreground"
+            )}
+          >
+            <TrainFront className="size-4" />
+            終電
+          </span>
+          <Switch
+            checked={searchMode === "now"}
+            onCheckedChange={onModeChange}
+          />
+          <span
+            className={cn(
+              "flex items-center gap-1 text-sm font-bold",
+              searchMode === "now" ? "text-foreground" : "text-muted-foreground"
+            )}
+          >
+            <Clock className="size-4" />
+            現在
+          </span>
+        </div>
+        <div className="flex flex-col gap-2 overflow-y-auto px-3 pb-3">
           {journeys.map((journey, i) => (
             <JourneyCard
               key={`journey-${journey.legs[0]?.departureSecs ?? i}`}

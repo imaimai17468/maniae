@@ -77,8 +77,8 @@ export const DestinationSearch = ({ onSelect }: DestinationSearchProps) => {
           onChange={(e) => handleChange(e.target.value)}
           placeholder="目的地を入力..."
           className={cn(
-            "bg-card border-border text-foreground placeholder:text-muted-foreground w-full rounded-lg border py-2.5 pr-4 pl-10 text-base backdrop-blur-md",
-            "focus:border-accent focus:ring-accent/30 focus:outline-none focus:ring-2"
+            "search-input bg-card border-border text-foreground placeholder:text-muted-foreground w-full rounded-lg border py-2.5 pr-4 pl-10 text-base backdrop-blur-md",
+            "focus:outline-none focus:ring-2"
           )}
         />
         {loading && (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { MapPin, AlertTriangle, Moon, Sun } from "lucide-react";
+import { AlertTriangle, Moon, Sun } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useTheme } from "next-themes";
 import logoBlack from "@/assets/logo-square-black.png";
@@ -57,19 +57,21 @@ export const LastTrainPage = () => {
   const [destination, setDestination] = useState<SuggestStation | null>(null);
   const [searchMode, setSearchMode] = useState<SearchMode>("last");
   const [panelOpen, setPanelOpen] = useState(true);
+  const [locationError, setLocationError] = useState(false);
   const { resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => {
-    const fallbackToReady = () => {
+    const handleLocationError = () => {
+      setLocationError(true);
       setAppState("ready");
     };
 
     if (!("geolocation" in navigator) || !window.isSecureContext) {
-      fallbackToReady();
+      handleLocationError();
       return;
     }
 
-    const timeoutId = setTimeout(fallbackToReady, 15000);
+    const timeoutId = setTimeout(handleLocationError, 15000);
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -84,7 +86,7 @@ export const LastTrainPage = () => {
       },
       () => {
         clearTimeout(timeoutId);
-        fallbackToReady();
+        handleLocationError();
       },
       { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
     );
@@ -195,19 +197,16 @@ export const LastTrainPage = () => {
         </div>
       )}
 
-      {appState === "ready" &&
-        nearbyStations.length > 0 &&
-        allJourneys.length === 0 && (
-          <div className="absolute bottom-4 right-4 left-4 z-10">
-            <div className="bg-card flex items-center gap-2 rounded-lg border p-3">
-              <MapPin className="text-accent size-4 shrink-0" />
-              <p className="text-muted-foreground text-xs">
-                周辺に{nearbyStations.length}
-                件の駅・停留所が見つかりました。目的地を入力して検索できます
-              </p>
-            </div>
+      {appState === "ready" && allJourneys.length === 0 && locationError && (
+        <div className="absolute bottom-4 right-4 left-4 z-10">
+          <div className="bg-card flex items-center gap-2 rounded-lg border p-3">
+            <AlertTriangle className="text-destructive size-4 shrink-0" />
+            <p className="text-muted-foreground text-xs">
+              位置情報を取得できませんでした。ブラウザの位置情報設定を確認してください
+            </p>
           </div>
-        )}
+        </div>
+      )}
 
       {appState === "results" && allJourneys.length > 0 && (
         <ResultsPanel

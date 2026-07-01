@@ -182,3 +182,7 @@
 .scoop-tab:hover .scoop-tab-hover-overlay {
   opacity: 1;
 }
+
+.search-input {
+  --tw-ring-color: #e0b400;
+}
